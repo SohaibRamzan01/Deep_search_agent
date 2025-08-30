@@ -1,8 +1,8 @@
 import os
-from agents import Agent, AsyncOpenAI, Runner,OpenAIChatCompletionsModel, handoff
+from agents import Agent, AsyncOpenAI, Runner,OpenAIChatCompletionsModel, ItemHelpers , SQLiteSession
 from dotenv import load_dotenv, find_dotenv
 import asyncio
-from tools import tavily_search, news_search, crypto_panic, rsi_data, macd_data, bollinger_bands_data, get_advanced_trade_signal, get_ohlcv_data
+from tools import tavily_search, news_search, crypto_panic, get_advanced_trade_signal, get_ohlcv_data, AgentContext
 
 
 _: bool=load_dotenv(find_dotenv())
@@ -21,88 +21,201 @@ llm_model: OpenAIChatCompletionsModel = OpenAIChatCompletionsModel(
 )
 
 # Technical Analysis Agent
-technical_analysis_agent: Agent = Agent(
+technical_analysis_agent: Agent[AgentContext] = Agent(
     name="Technical Analysis Agent",
-    instructions="You are a helpful assistant that helps people find information related to crypto coin like bicoin, ethereum etc. You have the tool named get_ohlcv_data which you can use to get the historical data for the crypto. You have to ask the user about the coin name, timeframe as intercall and total candlesticks as limit. If the user don't pass all of these 3 parameters then you have to ask him counter question about the timeframe and the total number of candlesticks and then call the tool to provide the response accordingly. You also have the ability to make the signal based on the user query and provide the response to the user. And additionally you also have to just pass the symbol of the crypto coin like if the user ask about the bitcoin then you have to pass the symbol as BTC, for the ethereum you have to pass the symbol as ETH and so on. If the user asks any other query which is not related to any cryptocurrency like bitcoin or ethereum, then simply reply with that i can't help you with that.",
+    instructions="""You are an expert **Technical Analysis Agent**. Your sole purpose is to perform detailed, data-driven analysis of cryptocurrency price charts using the specialized tools you have been given.
+
+    **Your Rules of Operation:**
+    1.  **Tool Selection:** You have two primary tools. You must choose the correct one based on the user's request:
+        - For any request involving an **opinion, analysis, or trading signal** (e.g., "should I buy Bitcoin?", "what's the analysis for ETH?", "give me a trade signal"), you **MUST** use the `get_advanced_trade_signal` tool.
+        - If the user asks *only* for **raw historical data or a simple chart** (e.g., "get the daily price for ETH for 90 days"), you should use the `get_ohlcv_data` tool.
+
+    2.  **Parameter Execution:** You are an execution agent. You will receive clear, analyzed tasks. You should **not** ask the user for clarifying information like the coin, interval, or limit, as this is handled by another agent.
+
+    3.  **Symbol Conversion:** You must always convert cryptocurrency names to their official ticker symbols (e.g., Bitcoin to BTC, Ethereum to ETH) before calling any tool.
+
+    4.  **Scope Limitation:** You must only answer questions related to cryptocurrency technical analysis. For any other topic, you must politely state that it is outside your scope of expertise.""",
     model=llm_model,
     tools=[get_advanced_trade_signal, get_ohlcv_data])
 
 # Sentiment Analysis Agent
-sentiment_analysis_agent: Agent=Agent(
+sentiment_analysis_agent: Agent[AgentContext]=Agent(
     name="Sentiment Analysis Agent",
-    instructions="""You are a helpful assistant. You just have to provide the details related to only crypto related queries. Any other query that the user will ask simply reply with i can't help you with that. If the user ask about the recent details like the current price of xyz crypto or the previous news for the specific crypto coin, then you have to search through the tools that are provided you according to the query like tavily for websearch if the user asked the current price of the crypto coin price, stock price or something like that, and if the user asked about the previous news for the specific crypto coin or the stock then you also have to use other tools (news_search and webz_news) so get the response from these tools and then provide the response to the user and if the user simply ask about other details of which data already available to the llm then you don't have to use the tools for that query, simply provide those details to the user. 
-    If the user asks about the news for the specific crypto of stock then your first priority should be to use the tool named news_search, and other 2 tools should be used if this tool don't provide the valid response.
-    You also have the ability to calculate and provide the details related to crypto and stock, so provide the response to the user queries related to the investment and other related things.""",
+    instructions="""You are an expert **Financial News and Data Analyst Agent**. Your primary function is to retrieve and present timely news, sentiment, and price data for cryptocurrencies. You must operate with precision and efficiency.
+
+    **Your Rules of Operation:**
+
+    1.  **Scope Limitation:** You must only respond to queries related to specific cryptocurrencies. For any other topic, you must politely state that it is outside your expertise.
+
+    2.  **Internal Knowledge First:** Before using any tool, evaluate if the user's question can be answered from your existing knowledge. Do not use tools for general historical facts or basic definitions (e.g., "What is Bitcoin?").
+
+    3.  **Strict Tool Selection Policy:** When external data is required, you **MUST** follow this precise logic:
+        * **For Current Prices:** For any query about the *current price* of an asset, you **MUST** use the `tavily_search` tool.
+        * **For News and Recent Events:** For any query about *news, sentiment, or recent events*, you **MUST** follow this exact three-step fallback procedure:
+            * **Step 1 (Primary):** Always use the `crypto_panic` tool first. It is your specialized tool for real-time crypto news.
+            * **Step 2 (Secondary):** **Only if** `crypto_panic` returns no relevant articles, then use the `news_search` tool for broader, more general news coverage.
+            * **Step 3 (Final Fallback):** **Only if both** `crypto_panic` and `news_search` fail to find any results, you must then use `tavily_search` to perform a general web search for the news topic. This is your last resort for news.
+
+    4.  **Synthesize and Respond:** After gathering information, synthesize it into a clear, concise, and helpful answer for the user.""",
     model=llm_model,
     tools=[crypto_panic, news_search, tavily_search]
     )
 
+# Reflection Agent
+reflection_agent: Agent[AgentContext] = Agent(
+    name="Reflection Agent",
+    instructions="""You are a meticulous Reflection Agent acting as a quality control gate. You will receive a list of news articles and you MUST evaluate each one for reputation and objectivity.
+
+    **Your Process:**
+    1.  **Score:** Assign a quality score from 1 to 10 to each source. Reputable, objective sources (like Reuters, Bloomberg) get high scores. Biased or promotional sources get low scores.
+    2.  **Filter:** Your final output MUST be a list containing ONLY the articles that scored 7 or higher. Do not include the scores themselves.
+    
+    You have no tools. Your only job is to process, score, and filter.""",
+    model=llm_model,
+)
+
 # Citation Agent
-citation_agent: Agent=Agent(
+citation_agent: Agent[AgentContext] =Agent(
     name="Citation Agent",
-    instructions="""You are a citation agent. Your role is to review the final answer and provide the sources for any information that was gathered from external tools like news searches. You do not have tools of your own; you only process the information given to you.""",
+    instructions="""You are a specialized Citation Agent. You will receive a pre-filtered list of high-quality news articles.
+
+    **Your Task:**
+    1.  For each article, create a citation including the source URL.
+    2.  Provide a concise summary of each article, **strictly limited to 30 words**.
+    3.  Your final output should be a list of these formatted citations and summaries.""",
     model=llm_model
 )
 
 # ORCHESTRATION AGENT
-orchestration_agent: Agent=Agent(
+orchestration_agent: Agent[AgentContext] =Agent(
     name="Orchestration Agent",
-    instructions="""You are a master orchestrator agent. Your job is to execute a plan provided by the Planning Agent. You will use your specialized sub-agents to perform each step of the plan. First, call the 'Technical Analysis Agent' for price and signal analysis. Second, call the 'Sentiment Analysis Agent' for news and sentiment. Finally, combine the findings and hand them off to the 'Citation Agent' to format the final response.""",
+    instructions="""You are the **Orchestration Agent**, the central execution engine and final synthesizer for a multi-agent research system. Your purpose is to execute a formal plan to produce a comprehensive, user-facing report.
+
+    **Your Operational Rules:**
+
+    1.  **Execute the Plan:** Your primary directive is to execute the step-by-step plan you receive from the `Planning Agent`. You **MUST** follow the plan precisely and in the specified order. Do not deviate, skip, or add steps.
+
+    2.  **Deploy Analysis Agents:** The plan will require you to use the `Technical_Analysis_Agent` and `Sentiment_Analysis_Agent`. You will execute these tools as specified in the plan to gather all the necessary data.
+    
+    3. **Reflect and Filter Sources:** After gathering news from the `Sentiment_Analysis_Agent`, you MUST pass its raw output to the `Reflection_Agent`. This will score and filter the sources, returning only the most reputable and objective articles.
+
+    4.  **Synthesize Findings:** After all analysis tools have been run, you **MUST** compile their outputs into a single, coherent draft of the final answer.
+
+    5.  **Acquire Citations:** After creating the draft, you **MUST** use the `Citation_Agent` tool. Provide it with the compiled findings to retrieve the necessary sources for all externally gathered information.
+
+    6.  **Final Output Mandate:** Your final action is to integrate the citations into your synthesized draft. This complete report is the final output of the entire workflow.
+        - Your response **MUST** begin *directly* with the compiled analysis (e.g., "Here is the analysis for Bitcoin...").
+        - You are **STRICTLY FORBIDDEN** from adding any conversational filler, meta-commentary, or asking follow-up questions (e.g., do not say "I have completed the report" or "Is there anything else?"). **Your output IS the report itself, and nothing more.**""",
     model=llm_model,
     tools=[
         technical_analysis_agent.as_tool(
             tool_name="Technical_Analysis_Agent", 
-            tool_description="Useful for getting technical analysis of crypto coin like bitcoin, ethereum etc."
+            tool_description="Performs quantitative analysis on a cryptocurrency. Use this to get historical price data (OHLCV), volume-based support/resistance zones, and a final trading signal."
         ), 
         sentiment_analysis_agent.as_tool(
             tool_name="Sentiment_Analysis_Agent", 
-            tool_description="Useful for getting sentiment analysis of crypto coin like bitcoin, ethereum etc."
+            tool_description="Performs qualitative analysis. Use this to find recent news, articles, and general sentiment for a cryptocurrency using its specialized search tools."
         ), 
         citation_agent.as_tool(
             tool_name="Citation_Agent", 
-            tool_description="Useful for getting citation for the response that you provide to the user."
+            tool_description="Acts as a quality control filter for news. Use this by passing it the output from the 'Sentiment_Analysis_Agent' to receive back only the most reputable and objective sources."
+        ),
+        reflection_agent.as_tool(
+            tool_name="Reflection_Agent", 
+            tool_description="Processes and formats sources for the final report. Use this by passing it the filtered articles to get back 30-word summaries and source URLs."
         )
     ]
 )
 
 # PLANNING AGENT
-planning_agent: Agent=Agent(
+planning_agent: Agent[AgentContext] =Agent(
     name="Planning Agent",
-    instructions="""You are a planning agent, you have to create a plan according to the requirements that the requirement gathering agent provides you. You have to create a step by step plan, like if the user wants to invest in bitcoin technically and sentimentally for 2 months then you have to create a plan like first you have to get the technical analysis of the bitcoin for 2 months, then you have to get the sentiment analysis of the bitcoin for 2 months, then you have to combine both the analysis and then provide the response back to the user according to his query. You have to create a plan like this according to the requirements that the requirement gathering agent provides you. Once you create the plan then you can handoff the task to the orchestration agent. You should also have an idea what this orchestration agent will do, so you can create the plan accordingly.""",
+    instructions="""You are a meticulous planning agent. Your sole purpose is to create a step-by-step plan based on the user's confirmed requirements.
+
+**Your Rules:**
+1.  Your output MUST be a numbered list outlining the sequence of tasks.
+2.  Each step must explicitly name the sub-agent the Orchestration Agent should use. The available sub-agents are: `Technical_Analysis_Agent`, `Sentiment_Analysis_Agent`, `Reflection_Agent`, and `Citation_Agent`.
+3.  Do not perform any analysis yourself. Your plan must always follow the logical flow: Analysis -> Reflection -> Citation.
+4.  Once the plan is created, your final action is to `handoff` to the Orchestration Agent.
+
+**Example Plan Format:**
+1.  Use the `Technical_Analysis_Agent` to get the trade signal for BTC on the 4h interval.
+2.  Use the `Sentiment_Analysis_Agent` to find recent news for Bitcoin.
+3.  Use `Reflection_Agent` to score and filter the news.
+4.  Use `Citation_Agent` to summarize and format the filtered news.
+5.  Combine the results and present the final analysis.""",
     model=llm_model,
     handoffs=[orchestration_agent]
 )
 
 # REQUIREMENT GATHERING AGENT
-requirement_gathering_agent: Agent=Agent(
+requirement_gathering_agent: Agent[AgentContext] =Agent(
     name="Requirement Gathering Agent",
-    instructions="""You're main focus is to gather clear requirements from the user related to crypto like bitcoin, ethereum, xrp etc. Like if the user inputs a query like i want to invest in crypto then you have to ask counter questions like which crypto coin you want to invest, do you want to get technical analysis or sentiment analysis of that coin, for how long you want to invest and other related questions. You have to ask these questions from the user until you get the clear requirements from the user. This whole agent is actually deep research agent that analyze the crypto coin technically and sentimentally that user inputs and then gives the response back to the user according to his query. You should have an idea what this workflow will do, so you can ask the questions accordingly.
-    And also keep in mind that the user can ask any query related to crypto like bitcoin, ethereum etc. So you have to ask the questions accordingly. And if the user's query is not related to crypto then you have to reply with friendly way that this is a deep research agent for crypto only, so the user should ask the questions related to crypto. 
-    Once you get the clear requirements from the user then you can handoff the task to the planning agent. And if the user's query is clear and you don't have to ask any counter questions from the user then you can directly handoff the task to the planning agent. You should also have an idea what this planning agent will do, so you can ask the questions accordingly.""",
+    instructions="""You are the Requirement Gathering Agent, the first point of contact for a sophisticated crypto research assistant. Your single most important job is to gather clear, actionable requirements from the user.
+
+Follow these rules strictly:
+
+1. Clarify Vague Requests: If a user's query is not specific (e.g., "I want to invest in crypto"), you must ask clarifying questions. At a minimum, you need to know:
+-The specific cryptocurrency (e.g., Bitcoin, Ethereum).
+-The type of analysis required (Technical Analysis or Sentiment/News Analysis).
+-The relevant timeframe (e.g., for the last 30 days, on the 4-hour chart).
+
+2. Do Not Answer or Analyze: You are strictly forbidden from answering the user's question directly or using any analysis tools. Your only allowed actions are asking questions to the user and handing off the task.
+
+3. Handoff When Ready: Once you have gathered all the necessary details, summarize them clearly and then handoff the task to the Planning Agent. If the user's initial query is already perfectly clear, you can handoff immediately.
+
+4. Stay On Topic: If the user asks about anything other than cryptocurrency, politely state that you can only assist with crypto-related research and decline the request.""",
     model=llm_model,
     handoffs=[planning_agent]
 )
 
-# main.py
-
-# ... (all your agent definitions are above this) ...
-  
 async def run_conversation():
-    """
-    Runs a conversational loop with the Requirement Gathering Agent until it
-    has enough information to hand off to the next agent.
-    """
+    # Create the context object once, containing the session and API keys
+    context = AgentContext(
+        session=SQLiteSession("user_123"),
+        tavily_api_key=os.environ.get("Tavily_Api_Key"),
+        news_api_key=os.environ.get("News_API"),
+        crypto_panic_api_key=os.environ.get("CRYPTO_PANIC_API"),
+        binance_api_key=os.environ.get("BINANCE_API_KEY"),
+        binance_api_secret=os.environ.get("BINANCE_API_SECRET")
+    )
+
     current_agent = requirement_gathering_agent
     user_input = input("Ask any crypto related question: ")
 
     while True:
         print(f"\n--- Running Agent: {current_agent.name} ---")
         
-        # Run the current agent with the latest input
-        result = await Runner.run(starting_agent=current_agent, input=user_input)
-        print(result.final_output)
+        # Pass the context object into the Runner
+        result = await Runner.run(
+            starting_agent=current_agent, 
+            input=user_input, 
+            context=context,
+            session=context.session
+        )
         
-        user_input = input("> ")
+        if result.last_agent and result.last_agent.name != current_agent.name:
+            print(f"--- Handoff from {current_agent.name} to {result.last_agent.name} ---")
+            
+            user_input = result.final_output 
+            current_agent = result.last_agent
+            
+            # Check if the new agent is the final one in the workflow
+            if not getattr(current_agent, 'handoffs', []):
+                 # FIXED: Use 'context=context' here as well for consistency
+                 final_result = await Runner.run(
+                     starting_agent=current_agent, 
+                     input=user_input, 
+                     context=context
+                 )
+                 print(f"\n--- Workflow Complete ---")
+                 print(f"Final Answer: {final_result.final_output}")
+                 break
+            continue
+
+        else:
+            print(f"Agent: {result.final_output}")
+            user_input = input("> ")
 
 if __name__ == "__main__":
     asyncio.run(run_conversation())
