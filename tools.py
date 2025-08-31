@@ -211,23 +211,25 @@ def analyze_price_action(ohlcv_data: list, support_zone: tuple, resistance_zone:
 
 
 @function_tool
-async def get_ohlcv_data(symbol: str, interval: str = '1d', limit: int = 90):
+async def get_ohlcv_data(wrapper: RunContextWrapper[AgentContext], symbol: str, interval: str = '1d', limit: int = 90):
     """
     A tool to fetch historical OHLCV data for a cryptocurrency.
     """
     try:
-        return await _fetch_ohlcv_data(symbol, interval, limit)
+        # Pass the 'wrapper' object to the helper function
+        return await _fetch_ohlcv_data(wrapper, symbol, interval, limit)
     except Exception as e:
         return {"error": f"An error occurred: {str(e)}"}
     
 
 @function_tool
-async def get_advanced_trade_signal(symbol: str, interval: str = '1h'):
+async def get_advanced_trade_signal(wrapper: RunContextWrapper[AgentContext], symbol: str, interval: str = '1h'):
     """
     Calculates S/R zones based on Volume Profile and provides advanced signals.
     """
     try:
-        ohlcv_data = await _fetch_ohlcv_data(symbol, interval=interval, limit=300)
+        # Pass the 'wrapper' object to the helper function
+        ohlcv_data = await _fetch_ohlcv_data(wrapper, symbol, interval=interval, limit=300)
 
         if not isinstance(ohlcv_data, list) or len(ohlcv_data) < 50:
             return {"error": "Could not retrieve sufficient historical data for analysis."}
@@ -250,4 +252,3 @@ async def get_advanced_trade_signal(symbol: str, interval: str = '1h'):
         }
     except Exception as e:
         return {"error": f"An error occurred: {str(e)}"}
-    

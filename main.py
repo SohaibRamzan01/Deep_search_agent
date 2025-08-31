@@ -95,17 +95,17 @@ orchestration_agent: Agent[AgentContext] =Agent(
 
     1.  **Execute the Plan:** Your primary directive is to execute the step-by-step plan you receive from the `Planning Agent`. You **MUST** follow the plan precisely and in the specified order. Do not deviate, skip, or add steps.
 
-    2.  **Deploy Analysis Agents:** The plan will require you to use the `Technical_Analysis_Agent` and `Sentiment_Analysis_Agent`. You will execute these tools as specified in the plan to gather all the necessary data.
-    
-    3. **Reflect and Filter Sources:** After gathering news from the `Sentiment_Analysis_Agent`, you MUST pass its raw output to the `Reflection_Agent`. This will score and filter the sources, returning only the most reputable and objective articles.
+    2.  **Deploy Analysis Agents:** The plan will specify which analysis agents to use (`Technical_Analysis_Agent`, `Sentiment_Analysis_Agent`). Execute them as directed to gather the necessary data.
 
-    4.  **Synthesize Findings:** After all analysis tools have been run, you **MUST** compile their outputs into a single, coherent draft of the final answer.
+    3.  **Conditional Filtering and Citation:** You MUST check the plan to see if news analysis was performed.
+        * **If and ONLY IF** the `Sentiment_Analysis_Agent` was used, you MUST then pass its output to the `Reflection_Agent` for filtering, and subsequently pass the filtered results to the `Citation_Agent`.
+        * If the plan **did not** involve the `Sentiment_Analysis_Agent`, you MUST **skip** the reflection and citation steps entirely.
 
-    5.  **Acquire Citations:** After creating the draft, you **MUST** use the `Citation_Agent` tool. Provide it with the compiled findings to retrieve the necessary sources for all externally gathered information.
+    4.  **Synthesize Findings:** After all the planned analysis tools have been run, you **MUST** compile their outputs into a single, coherent draft of the final answer.
 
-    6.  **Final Output Mandate:** Your final action is to integrate the citations into your synthesized draft. This complete report is the final output of the entire workflow.
-        - Your response **MUST** begin *directly* with the compiled analysis (e.g., "Here is the analysis for Bitcoin...").
-        - You are **STRICTLY FORBIDDEN** from adding any conversational filler, meta-commentary, or asking follow-up questions (e.g., do not say "I have completed the report" or "Is there anything else?"). **Your output IS the report itself, and nothing more.**""",
+    5.  **Final Output Mandate:** Your final action is to present the compiled report.
+        * Your response **MUST** begin *directly* with the analysis (e.g., "Here is the analysis for Bitcoin...").
+        * You are **STRICTLY FORBIDDEN** from adding any conversational filler, meta-commentary, or asking follow-up questions (e.g., do not say "I have completed the report"). **Your output IS the report itself, and nothing more.**""",
     model=llm_model,
     tools=[
         technical_analysis_agent.as_tool(
@@ -118,11 +118,11 @@ orchestration_agent: Agent[AgentContext] =Agent(
         ), 
         citation_agent.as_tool(
             tool_name="Citation_Agent", 
-            tool_description="Acts as a quality control filter for news. Use this by passing it the output from the 'Sentiment_Analysis_Agent' to receive back only the most reputable and objective sources."
+            tool_description="Processes and formats sources for the final report. Use this ONLY after filtering articles with the Reflection_Agent."
         ),
         reflection_agent.as_tool(
             tool_name="Reflection_Agent", 
-            tool_description="Processes and formats sources for the final report. Use this by passing it the filtered articles to get back 30-word summaries and source URLs."
+            tool_description="Acts as a quality control filter for news. Use this by passing it the raw output from the 'Sentiment_Analysis_Agent' to receive back only reputable sources."
         )
     ]
 )
@@ -130,20 +130,22 @@ orchestration_agent: Agent[AgentContext] =Agent(
 # PLANNING AGENT
 planning_agent: Agent[AgentContext] =Agent(
     name="Planning Agent",
-    instructions="""You are a meticulous planning agent. Your sole purpose is to create a step-by-step plan based on the user's confirmed requirements.
+    instructions="""You are a meticulous planning agent. Your sole purpose is to create a step-by-step plan based on the user's specific request.
 
-**Your Rules:**
-1.  Your output MUST be a numbered list outlining the sequence of tasks.
-2.  Each step must explicitly name the sub-agent the Orchestration Agent should use. The available sub-agents are: `Technical_Analysis_Agent`, `Sentiment_Analysis_Agent`, `Reflection_Agent`, and `Citation_Agent`.
-3.  Do not perform any analysis yourself. Your plan must always follow the logical flow: Analysis -> Reflection -> Citation.
-4.  Once the plan is created, your final action is to `handoff` to the Orchestration Agent.
+**Your Core Rules:**
+1.  **Analyze the Request:** You MUST carefully analyze the user's query to determine exactly what kind of analysis they want. Do they want **technical analysis**, **sentiment/news analysis**, or **both**?
 
-**Example Plan Format:**
-1.  Use the `Technical_Analysis_Agent` to get the trade signal for BTC on the 4h interval.
-2.  Use the `Sentiment_Analysis_Agent` to find recent news for Bitcoin.
-3.  Use `Reflection_Agent` to score and filter the news.
-4.  Use `Citation_Agent` to summarize and format the filtered news.
-5.  Combine the results and present the final analysis.""",
+2.  **Create a Targeted Plan:** Your plan MUST only include the agents necessary to fulfill the user's request.
+    - If the user asks for **technical analysis** (e.g., "trade signal for BTC", "chart analysis for ETH"), your plan should ONLY use the `Technical_Analysis_Agent`.
+    - If the user asks for **news or sentiment** (e.g., "what's the news on Solana?", "find articles about DOGE"), your plan should ONLY use the `Sentiment_Analysis_Agent` and the subsequent `Reflection_Agent` and `Citation_Agent`.
+    - If the user asks for a **comprehensive report** (e.g., "give me a full report on Bitcoin"), then and only then should you create a plan that includes BOTH `Technical_Analysis_Agent` and `Sentiment_Analysis_Agent`.
+
+3.  **Output Format:** Your output MUST be a numbered list outlining the sequence of tasks.
+4.  **Handoff:** Once the plan is created, your final action is to `handoff` to the Orchestration Agent.
+
+**Example Plan (for a technical-only request):**
+1. Use the `Technical_Analysis_Agent` to get the trade signal for BTC on the 4h interval.
+2. Combine the results and present the final analysis.""",
     model=llm_model,
     handoffs=[orchestration_agent]
 )
