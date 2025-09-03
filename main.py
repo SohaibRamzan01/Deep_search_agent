@@ -171,53 +171,53 @@ Follow these rules strictly:
     handoffs=[planning_agent]
 )
 
-async def run_conversation():
-    # Create the context object once, containing the session and API keys
-    context = AgentContext(
-        session=SQLiteSession("user_123"),
-        tavily_api_key=os.environ.get("Tavily_Api_Key"),
-        news_api_key=os.environ.get("News_API"),
-        crypto_panic_api_key=os.environ.get("CRYPTO_PANIC_API"),
-        binance_api_key=os.environ.get("BINANCE_API_KEY"),
-        binance_api_secret=os.environ.get("BINANCE_API_SECRET")
-    )
+# async def run_conversation():
+#     # Create the context object once, containing the session and API keys
+#     context = AgentContext(
+#         session=SQLiteSession("user_123"),
+#         tavily_api_key=os.environ.get("Tavily_Api_Key"),
+#         news_api_key=os.environ.get("News_API"),
+#         crypto_panic_api_key=os.environ.get("CRYPTO_PANIC_API"),
+#         binance_api_key=os.environ.get("BINANCE_API_KEY"),
+#         binance_api_secret=os.environ.get("BINANCE_API_SECRET")
+#     )
 
-    current_agent = requirement_gathering_agent
-    user_input = input("Ask any crypto related question: ")
+#     current_agent = requirement_gathering_agent
+#     user_input = input("Ask any crypto related question: ")
 
-    while True:
-        print(f"\n--- Running Agent: {current_agent.name} ---")
+#     while True:
+#         print(f"\n--- Running Agent: {current_agent.name} ---")
         
-        # Pass the context object into the Runner
-        result = await Runner.run(
-            starting_agent=current_agent, 
-            input=user_input, 
-            context=context,
-            session=context.session
-        )
+#         # Pass the context object into the Runner
+#         result = await Runner.run(
+#             starting_agent=current_agent, 
+#             input=user_input, 
+#             context=context,
+#             session=context.session
+#         )
         
-        if result.last_agent and result.last_agent.name != current_agent.name:
-            print(f"--- Handoff from {current_agent.name} to {result.last_agent.name} ---")
+#         if result.last_agent and result.last_agent.name != current_agent.name:
+#             print(f"--- Handoff from {current_agent.name} to {result.last_agent.name} ---")
             
-            user_input = result.final_output 
-            current_agent = result.last_agent
+#             user_input = result.final_output 
+#             current_agent = result.last_agent
             
-            # Check if the new agent is the final one in the workflow
-            if not getattr(current_agent, 'handoffs', []):
-                 # FIXED: Use 'context=context' here as well for consistency
-                 final_result = await Runner.run(
-                     starting_agent=current_agent, 
-                     input=user_input, 
-                     context=context
-                 )
-                 print(f"\n--- Workflow Complete ---")
-                 print(f"Final Answer: {final_result.final_output}")
-                 break
-            continue
+#             # Check if the new agent is the final one in the workflow
+#             if not getattr(current_agent, 'handoffs', []):
+#                  # FIXED: Use 'context=context' here as well for consistency
+#                  final_result = await Runner.run(
+#                      starting_agent=current_agent, 
+#                      input=user_input, 
+#                      context=context
+#                  )
+#                  print(f"\n--- Workflow Complete ---")
+#                  print(f"Final Answer: {final_result.final_output}")
+#                  break
+#             continue
 
-        else:
-            print(f"Agent: {result.final_output}")
-            user_input = input("> ")
+#         else:
+#             print(f"Agent: {result.final_output}")
+#             user_input = input("> ")
 
-if __name__ == "__main__":
-    asyncio.run(run_conversation())
+# if __name__ == "__main__":
+#     asyncio.run(run_conversation())
